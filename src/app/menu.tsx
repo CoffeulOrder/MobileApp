@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { Redirect, router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -9,30 +9,84 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { C, CATEGORIES, MENU, Radius, S, SERIF, won, type Category, type MenuItem } from '@/constants/coffeul';
+import { Avatar, LoadingView, RetryView } from '@/components/ui/kit';
+import { C, Radius, S, won, type MenuItem } from '@/constants/coffeul';
 import { useCart } from '@/hooks/use-cart';
+import { useLogout } from '@/hooks/use-logout';
+import { useMenu } from '@/hooks/use-menu';
+import { useSchool } from '@/hooks/use-school';
+
+const PROFILE_ACTIONS: { icon: string; label: string; go: () => void }[] = [
+  { icon: '🧋', label: '주문하기', go: () => {} },
+  { icon: '💳', label: '결제수단 관리', go: () => router.push('/payment-methods') },
+  { icon: '🔔', label: '주문 알림', go: () => router.push('/notifications') },
+  { icon: '🎟️', label: '쿠폰 관리', go: () => router.push('/coupons') },
+];
 
 export default function MenuScreen() {
-  const [cat, setCat] = useState<Category>('에스프레소');
+  const [cat, setCat] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const cart = useCart();
+  const logout = useLogout();
+  const { school } = useSchool();
+  const { cafe, status, soldOut, sync, retry, refreshSoldOut } = useMenu();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const cardW = (width - S.lg * 2 - S.md) / 2;
 
-  const items = useMemo(() => MENU.filter((m) => m.category === cat), [cat]);
+  const cafeId = cafe?.id ?? null;
+
+  // 화면에 들어올 때마다: 메뉴 버전 체크(30초 이내면 생략) + 이 카페의 품절 현황 조회(캐시 안 함)
+  useFocusEffect(
+    useCallback(() => {
+      void sync('screen');
+      if (cafeId) void refreshSoldOut(cafeId);
+    }, [sync, refreshSoldOut, cafeId]),
+  );
+
+  const categories = useMemo(() => [...new Set((cafe?.menus ?? []).map((m) => m.category))], [cafe]);
+  const activeCat = cat && categories.includes(cat) ? cat : (categories[0] ?? null);
+  const items = useMemo(
+    () => (cafe?.menus ?? []).filter((m) => m.category === activeCat),
+    [cafe, activeCat],
+  );
+  const soldOutSet = useMemo(() => new Set(soldOut[cafeId ?? ''] ?? []), [soldOut, cafeId]);
   const qtyOf = (id: string) => cart.lines.find((l) => l.item.id === id)?.qty ?? 0;
+
+  if (!school) return <Redirect href="/" />;
+  if (!cafe) {
+    if (status === 'loading') return <LoadingView label="메뉴를 불러오는 중…" />;
+    if (status === 'error') {
+      return (
+        <RetryView message="메뉴를 불러오지 못했어요. 네트워크를 확인해 주세요." onRetry={retry} />
+      );
+    }
+    return <Redirect href="/branch" />; // 지점을 아직 고르지 않았거나, 갱신으로 지점이 사라짐
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.brand}>Coffeul</Text>
-          <Text style={styles.hello}>안녕하세요, 고객님 ☕</Text>
-        </View>
-        <Pressable style={styles.logout} onPress={() => router.replace('/')}>
-          <Text style={styles.logoutText}>로그아웃</Text>
+        <Pressable style={styles.profileRow} onPress={() => setMenuOpen((v) => !v)} hitSlop={6}>
+          <Avatar />
+          <View>
+            <Text style={styles.brand}>ORMO</Text>
+            <Text style={styles.hello}>안녕하세요, 고객님 ☕</Text>
+          </View>
         </Pressable>
+
+        <View style={styles.headerRight}>
+          <Pressable style={styles.chip} onPress={() => router.replace('/branch')}>
+            <Text style={styles.chipText}>
+              {cafe.name} <Text style={styles.chipLink}>변경</Text>
+            </Text>
+          </Pressable>
+          <Pressable style={styles.chip} onPress={logout}>
+            <Text style={styles.chipText}>로그아웃</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -41,12 +95,12 @@ export default function MenuScreen() {
         contentContainerStyle={styles.pills}
         style={styles.pillsWrap}
         keyboardShouldPersistTaps="handled">
-        {CATEGORIES.map((c) => (
+        {categories.map((c) => (
           <Pressable
             key={c}
             onPress={() => setCat(c)}
-            style={[styles.pill, cat === c && styles.pillActive]}>
-            <Text style={[styles.pillText, cat === c && styles.pillTextActive]}>{c}</Text>
+            style={[styles.pill, activeCat === c && styles.pillActive]}>
+            <Text style={[styles.pillText, activeCat === c && styles.pillTextActive]}>{c}</Text>
           </Pressable>
         ))}
       </ScrollView>
@@ -57,12 +111,14 @@ export default function MenuScreen() {
           styles.grid,
           { paddingBottom: cart.count > 0 ? 110 : S.xl },
         ]}>
+        {items.length === 0 && <Text style={styles.empty}>등록된 메뉴가 없어요.</Text>}
         {items.map((item) => (
           <Card
             key={item.id}
             item={item}
             width={cardW}
             qty={qtyOf(item.id)}
+            soldOut={soldOutSet.has(item.id)}
             onAdd={() => cart.add(item)}
           />
         ))}
@@ -79,6 +135,26 @@ export default function MenuScreen() {
           </Pressable>
         </View>
       )}
+
+      {menuOpen && (
+        <View style={styles.menuLayer}>
+          <Pressable style={styles.menuDismiss} onPress={() => setMenuOpen(false)} />
+          <View style={[styles.menuCard, { top: insets.top + 54 }]}>
+            {PROFILE_ACTIONS.map((a) => (
+              <Pressable
+                key={a.label}
+                style={({ pressed }) => [styles.menuItem, pressed && { backgroundColor: C.surfaceAlt }]}
+                onPress={() => {
+                  setMenuOpen(false);
+                  a.go();
+                }}>
+                <Text style={styles.menuIcon}>{a.icon}</Text>
+                <Text style={styles.menuItemLabel}>{a.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -87,18 +163,27 @@ function Card({
   item,
   width,
   qty,
+  soldOut,
   onAdd,
 }: {
   item: MenuItem;
   width: number;
   qty: number;
+  soldOut: boolean;
   onAdd: () => void;
 }) {
   return (
     <View style={[styles.card, { width }]}>
       <View style={styles.thumb}>
-        {item.image ? (
-          <Image source={{ uri: item.image }} style={styles.thumbImg} contentFit="cover" transition={200} />
+        {item.thumbnailUrl ? (
+          <Image
+            source={{ uri: item.thumbnailUrl }}
+            style={styles.thumbImg}
+            contentFit="cover"
+            transition={200}
+            cachePolicy="disk"
+            recyclingKey={item.id}
+          />
         ) : (
           <Text style={styles.thumbFallback}>☕</Text>
         )}
@@ -107,15 +192,24 @@ function Card({
             <Text style={styles.qtyBadgeText}>{qty}</Text>
           </View>
         )}
+        {soldOut && (
+          <View style={styles.soldOutMask}>
+            <Text style={styles.soldOutBadge}>품절</Text>
+          </View>
+        )}
       </View>
-      <View style={styles.cardBody}>
+      <View style={[styles.cardBody, soldOut && { opacity: 0.45 }]}>
         <Text style={styles.name}>{item.name}</Text>
         <Text style={styles.desc} numberOfLines={2}>
           {item.desc}
         </Text>
         <View style={styles.priceRow}>
           <Text style={styles.price}>{won(item.price)}</Text>
-          <Pressable style={styles.add} onPress={onAdd} hitSlop={8}>
+          <Pressable
+            style={[styles.add, soldOut && styles.addDisabled]}
+            onPress={onAdd}
+            disabled={soldOut}
+            hitSlop={8}>
             <Text style={styles.addText}>+</Text>
           </Pressable>
         </View>
@@ -134,17 +228,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: S.lg,
     paddingTop: S.md,
     paddingBottom: S.md,
+    gap: S.sm,
   },
-  brand: { fontFamily: SERIF, fontSize: 24, fontWeight: '700', color: C.text },
-  hello: { color: C.textSecondary, fontSize: 13, marginTop: 2 },
-  logout: {
+  profileRow: { flexDirection: 'row', alignItems: 'center', gap: S.sm, flexShrink: 1 },
+  brand: { fontSize: 20, fontWeight: '900', color: C.ink, letterSpacing: 0.5 },
+  hello: { color: C.textSecondary, fontSize: 12, marginTop: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: S.xs },
+  chip: {
     borderWidth: 1,
     borderColor: C.border,
     borderRadius: Radius.sm,
-    paddingHorizontal: S.md,
-    paddingVertical: S.sm,
+    paddingHorizontal: S.sm,
+    paddingVertical: S.xs,
   },
-  logoutText: { color: C.textSecondary, fontSize: 13 },
+  chipText: { color: C.textSecondary, fontSize: 12 },
+  chipLink: { color: C.primary, fontWeight: '800', textDecorationLine: 'underline' },
 
   pillsWrap: { flexGrow: 0, flexShrink: 0 },
   pills: { paddingHorizontal: S.lg, gap: S.sm, paddingVertical: S.sm, alignItems: 'center' },
@@ -168,6 +266,7 @@ const styles = StyleSheet.create({
     paddingTop: S.sm,
     gap: S.md,
   },
+  empty: { color: C.textMuted, fontSize: 14, paddingVertical: S.xl, width: '100%', textAlign: 'center' },
   card: {
     backgroundColor: C.surface,
     borderRadius: Radius.md,
@@ -196,6 +295,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   qtyBadgeText: { color: C.onPrimary, fontWeight: '800', fontSize: 12 },
+  soldOutMask: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(243,246,255,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  soldOutBadge: {
+    color: C.onInk,
+    backgroundColor: C.ink,
+    fontSize: 13,
+    fontWeight: '800',
+    paddingHorizontal: S.md,
+    paddingVertical: S.xs,
+    borderRadius: Radius.pill,
+    overflow: 'hidden',
+  },
   cardBody: { padding: S.md, gap: S.xs },
   name: { color: C.text, fontSize: 15, fontWeight: '800' },
   desc: { color: C.textSecondary, fontSize: 12, lineHeight: 17, minHeight: 34 },
@@ -214,6 +333,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  addDisabled: { backgroundColor: C.border },
   addText: { color: C.onPrimary, fontSize: 18, fontWeight: '800', lineHeight: 20 },
 
   barWrap: {
@@ -236,12 +356,37 @@ const styles = StyleSheet.create({
     minWidth: 24,
     height: 24,
     borderRadius: Radius.pill,
-    backgroundColor: C.bgDeep,
+    backgroundColor: C.ink,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
   },
-  barBadgeText: { color: C.text, fontWeight: '800', fontSize: 12 },
+  barBadgeText: { color: C.onInk, fontWeight: '800', fontSize: 12 },
   barLabel: { flex: 1, textAlign: 'center', color: C.onPrimary, fontWeight: '800', fontSize: 15 },
   barTotal: { color: C.onPrimary, fontWeight: '800', fontSize: 15 },
+
+  menuLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50 },
+  menuDismiss: { flex: 1 },
+  menuCard: {
+    position: 'absolute',
+    left: S.lg,
+    minWidth: 210,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: Radius.md,
+    paddingVertical: S.xs,
+    gap: 2,
+    boxShadow: '0 8px 24px rgba(17,24,39,0.14)',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: S.md,
+    paddingHorizontal: S.lg,
+    paddingVertical: S.md,
+    borderRadius: Radius.sm,
+  },
+  menuIcon: { fontSize: 18 },
+  menuItemLabel: { color: C.text, fontSize: 14, fontWeight: '700' },
 });
