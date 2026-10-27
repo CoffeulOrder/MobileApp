@@ -1,26 +1,33 @@
 /**
- * Coffeul design tokens — a warm, dark "coffee shop" palette.
- * UI-only mock: colors, spacing, radius, and the menu seed data.
+ * ORMO (ORSO Mobile Order) design tokens — light theme.
+ * Brand palette: blue #008AFF / ink #111827 / gray #D9D9D9 / tint #F3F6FF.
+ * UI-only mock: colors, spacing, radius, schools, branches and menu seed data.
  */
 
 export const C = {
-  /** page background (top of the subtle vertical fade) */
-  bg: '#241811',
-  bgDeep: '#1A0F09',
+  /** page background (brand tint) */
+  bg: '#F3F6FF',
   /** raised surfaces: cards, inputs, sheets */
-  surface: '#2E2016',
-  surfaceAlt: '#3A2A1D',
+  surface: '#FFFFFF',
+  /** recessed / placeholder areas: thumbnails, suffix chips, pressed rows */
+  surfaceAlt: '#E8EEFB',
   /** hairlines */
-  border: '#4A3626',
-  /** brand gold */
-  primary: '#D6A15E',
-  primaryDim: '#B9863F',
+  border: '#D9D9D9',
+  /** brand blue */
+  primary: '#008AFF',
+  primaryDim: '#006FD0',
   /** text sitting on top of `primary` */
-  onPrimary: '#2A1B0C',
+  onPrimary: '#FFFFFF',
+  /** brand ink: dark badges, wordmark */
+  ink: '#111827',
+  /** text sitting on top of `ink` */
+  onInk: '#FFFFFF',
+  /** 오류/경고 문구 (중복 닉네임, 잘못된 입력 등) */
+  danger: '#D92D20',
   /** text */
-  text: '#F4ECE2',
-  textSecondary: '#C7B39E',
-  textMuted: '#8C7861',
+  text: '#111827',
+  textSecondary: '#4B5563',
+  textMuted: '#8A92A0',
 } as const;
 
 export const Radius = {
@@ -39,110 +46,124 @@ export const S = {
   xxl: 32,
 } as const;
 
-export const SERIF = 'Georgia';
+export type School = {
+  id: string;
+  name: string;
+  /** 이 학교의 이메일 도메인 ("@" 제외). 로그인/회원가입 시 접미사로 고정됨. */
+  emailDomain: string;
+};
 
-export type Category = '에스프레소' | '논커피' | '티' | '디저트';
+/**
+ * 서비스 중인 학교 목록 (목업 데이터).
+ * TODO: 백엔드 연동 시 API 응답으로 교체 — 화면은 `useSchools()` 로만 접근한다.
+ */
+export const SCHOOLS: School[] = [
+  { id: 'konkuk', name: '건국대학교', emailDomain: 'konkuk.ac.kr' },
+  { id: 'hanyang', name: '한양대학교', emailDomain: 'hanyang.ac.kr' },
+  { id: 'snu', name: '서울대학교', emailDomain: 'snu.ac.kr' },
+];
 
-export const CATEGORIES: Category[] = ['에스프레소', '논커피', '티', '디저트'];
 
+/**
+ * 메뉴 데이터 타입. 서버(`GET /schools/{id}/menus`) 응답 형태와 같고, 로컬 캐시에도 이 모양 그대로 저장된다.
+ * 학교(School) → 카페(Cafe, UI 용어로는 "지점") → 메뉴(MenuItem).
+ */
 export type MenuItem = {
   id: string;
   name: string;
   desc: string;
+  /** 표시용 가격. 실제 결제 금액은 주문 시 서버가 검증한다. */
   price: number;
-  category: Category;
-  image?: string;
+  category: string;
+  /** 목록(카드)용 작은 이미지 */
+  thumbnailUrl?: string;
+  /** 상세용 큰 이미지 (현재 상세 화면은 없음) */
+  imageUrl?: string;
 };
 
-const img = (id: string) =>
-  `https://images.unsplash.com/photo-${id}?w=400&q=70&auto=format&fit=crop`;
+export type Cafe = {
+  id: string;
+  name: string;
+  /** 주문번호 접두어 (예: BS-114067) */
+  code: string;
+  menus: MenuItem[];
+};
 
-export const MENU: MenuItem[] = [
+export type MenuPayload = {
+  /** 학교 단위 menu_version (정수). 바뀔 때만 메뉴를 다시 받는다. */
+  version: number;
+  cafes: Cafe[];
+};
+
+/**
+ * 주문 후 가게 사정(재료 소진 등)으로 일부 메뉴가 취소될 때의 처리 방식. 주문할 때 고객이 고른다.
+ *  - ALLOW_PARTIAL: 취소된 메뉴만 환불하고 나머지 주문은 그대로 진행
+ *  - CANCEL_ALL   : 일부라도 취소되면 주문 전체를 취소하고 전액 환불
+ * 실제 취소/환불은 서버가 수행하며, 앱은 선택값을 `POST /orders` 의 `cancelPolicy` 로 보낸다.
+ */
+export type CancelPolicy = 'ALLOW_PARTIAL' | 'CANCEL_ALL';
+
+export const DEFAULT_CANCEL_POLICY: CancelPolicy = 'ALLOW_PARTIAL';
+
+export const CANCEL_POLICY_OPTIONS: {
+  value: CancelPolicy;
+  title: string;
+  desc: string;
+  /** 주문 완료 화면 등에서 짧게 보여줄 때 */
+  short: string;
+}[] = [
   {
-    id: 'espresso',
-    name: '에스프레소',
-    desc: '진하고 풍부한 에스프레소 샷',
-    price: 3500,
-    category: '에스프레소',
-    image: img('1510591509098-f4fdc6d0ff04'),
+    value: 'ALLOW_PARTIAL',
+    title: '부분 취소 허용',
+    desc: '만들 수 없는 메뉴만 취소하고, 나머지는 그대로 준비해요. 취소된 메뉴 금액만 환불돼요.',
+    short: '부분 취소 허용',
   },
   {
-    id: 'americano',
-    name: '아메리카노',
-    desc: '에스프레소에 물을 더해 깔끔하게',
-    price: 4000,
-    category: '에스프레소',
-    image: img('1521302080334-4bebac2763a6'),
-  },
-  {
-    id: 'cappuccino',
-    name: '카푸치노',
-    desc: '에스프레소, 스팀밀크, 우유 거품의 조화',
-    price: 5000,
-    category: '에스프레소',
-    image: img('1534778101976-62847782c213'),
-  },
-  {
-    id: 'latte',
-    name: '카페 라떼',
-    desc: '부드러운 스팀밀크와 에스프레소',
-    price: 5000,
-    category: '에스프레소',
-    image: img('1541167760496-1628856ab772'),
-  },
-  {
-    id: 'vanilla-latte',
-    name: '바닐라 라떼',
-    desc: '달콤한 바닐라 시럽이 어우러진 라떼',
-    price: 5500,
-    category: '에스프레소',
-    image: img('1461023058943-07fcbe16d735'),
-  },
-  {
-    id: 'choco',
-    name: '초콜릿 라떼',
-    desc: '진한 초콜릿과 우유의 달콤한 만남',
-    price: 5500,
-    category: '논커피',
-    image: img('1517578239113-b03992dcdd25'),
-  },
-  {
-    id: 'milk-tea',
-    name: '밀크티',
-    desc: '홍차와 우유가 어우러진 부드러운 맛',
-    price: 5000,
-    category: '논커피',
-  },
-  {
-    id: 'earl-grey',
-    name: '얼그레이',
-    desc: '베르가못 향이 은은한 홍차',
-    price: 4500,
-    category: '티',
-    image: img('1594631252845-29fc4cc8cde9'),
-  },
-  {
-    id: 'peppermint',
-    name: '페퍼민트',
-    desc: '상쾌하고 깔끔한 허브티',
-    price: 4500,
-    category: '티',
-  },
-  {
-    id: 'cheesecake',
-    name: '뉴욕 치즈케이크',
-    desc: '꾸덕하고 진한 클래식 치즈케이크',
-    price: 6500,
-    category: '디저트',
-    image: img('1533134242443-d4fd215305ad'),
-  },
-  {
-    id: 'brownie',
-    name: '브라우니',
-    desc: '겉은 바삭 속은 촉촉한 초코 브라우니',
-    price: 5000,
-    category: '디저트',
+    value: 'CANCEL_ALL',
+    title: '전체 취소',
+    desc: '일부 메뉴라도 취소되면 주문 전체를 취소하고 전액 환불해요.',
+    short: '전체 취소',
   },
 ];
 
+/**
+ * 교환권/쿠폰. 개인 계정에 귀속되며 양도할 수 없다(코드 입력/선물 기능 없음).
+ * 지금은 "매장별 특정 메뉴 교환권"(MENU_EXCHANGE)만 있고, 금액권(매장/앱 단위)은 `kind` 를 추가하는 식으로 얹는다.
+ * 서버가 모르는 kind 를 내려줘도 앱이 죽지 않도록 파서가 알 수 없는 kind 는 건너뛴다 (api/voucher-schema.ts).
+ *
+ * 유효기간(`expiresAt`)은 서버가 주는 절대 시각이며, 앱은 표시(D-day)에만 쓰고 사용 가능 여부는 서버가 판단한다.
+ */
+export type VoucherStatus = 'AVAILABLE' | 'USED' | 'EXPIRED';
+
+export type Voucher = {
+  id: string;
+  /** 서버가 주는 표시 이름. 예: "아메리카노 교환권" */
+  title: string;
+  status: VoucherStatus;
+  /** ISO 8601 */
+  expiresAt: string;
+} & {
+  kind: 'MENU_EXCHANGE';
+  cafeId: string;
+  /** 메뉴가 단종돼도 보여줄 수 있도록 서버가 함께 내려주는 표시용 이름 */
+  cafeName: string;
+  menuId: string;
+  menuName: string;
+};
+// 이후: | { kind: 'CAFE_CREDIT'; cafeId: string; balance: number } | { kind: 'APP_CREDIT'; balance: number }
+
+/** 한 주문에 쓸 수 있는 교환권 수 (API 는 배열이라 나중에 늘려도 요청 형태가 안 바뀐다) */
+export const MAX_VOUCHERS_PER_ORDER = 1;
+
 export const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
+
+/** 2027.06.30 */
+export const formatDate = (iso: string) => {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+};
+
+/** 만료까지 남은 일수 (표시용). 오늘 만료면 0, 지났으면 음수. */
+export const daysLeft = (iso: string, now = Date.now()) =>
+  Math.ceil((new Date(iso).getTime() - now) / 86_400_000);
