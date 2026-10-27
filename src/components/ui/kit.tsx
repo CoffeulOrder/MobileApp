@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 
 import { C, Radius, S } from '@/constants/coffeul';
+import { NICKNAME_MAX } from '@/constants/nickname';
+import type { NicknameInput } from '@/hooks/use-nickname';
 
 /** ORMO wordmark (cup + RMO). Source art is 591×193; `width` sets the rendered width. */
 export function Logo({ width = 220 }: { width?: number }) {
@@ -121,6 +123,63 @@ export function Avatar({ size = 40 }: { size?: number }) {
   );
 }
 
+/**
+ * 닉네임 입력: 글자 수(n/8) + 🎲 랜덤 + 중복확인 + 상태 문구.
+ * 상태/로직은 `useNicknameInput()` 이 갖고, 이 컴포넌트는 표시만 한다 (회원가입, 닉네임 변경 화면 공용).
+ */
+export function NicknameField({ label = '닉네임', nick }: { label?: string; nick: NicknameInput }) {
+  const len = [...nick.value].length;
+  const busy = nick.status === 'checking';
+  const isError = nick.status === 'taken' || nick.status === 'invalid' || nick.status === 'error';
+  const msgColor = nick.status === 'available' ? C.primary : isError ? C.danger : C.textMuted;
+
+  return (
+    <View style={{ gap: S.sm }}>
+      <View style={styles.nickHead}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        <Text style={styles.nickCount}>
+          {len}/{NICKNAME_MAX}
+        </Text>
+      </View>
+      <View style={styles.nickRow}>
+        <TextInput
+          style={[
+            styles.input,
+            { flex: 1, minWidth: 0 },
+            nick.status === 'available' && { borderColor: C.primary },
+            isError && { borderColor: C.danger },
+          ]}
+          value={nick.value}
+          onChangeText={nick.setValue}
+          maxLength={NICKNAME_MAX}
+          placeholder="닉네임 입력"
+          placeholderTextColor={C.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel={label}
+        />
+        <Pressable
+          style={[styles.nickBtn, busy && { opacity: 0.5 }]}
+          disabled={busy}
+          onPress={() => void nick.random()}
+          accessibilityLabel="랜덤 닉네임 생성">
+          <Text style={styles.nickBtnText}>🎲 랜덤</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.nickBtn, styles.nickBtnPrimary, (busy || len === 0) && { opacity: 0.5 }]}
+          disabled={busy || len === 0}
+          onPress={() => void nick.check()}
+          accessibilityLabel="닉네임 중복확인">
+          <Text style={[styles.nickBtnText, { color: C.onPrimary }]}>중복확인</Text>
+        </Pressable>
+      </View>
+      <Text style={[styles.nickMsg, { color: msgColor }]}>
+        {busy ? '확인 중…' : (nick.message ?? '2~8자, 한글·영문·숫자')}
+      </Text>
+    </View>
+  );
+}
+
 /** 데이터를 불러오는 동안 보여주는 가운데 정렬 로딩 화면. */
 export function LoadingView({ label = '불러오는 중…' }: { label?: string }) {
   return (
@@ -172,6 +231,20 @@ export function Field({
 }
 
 const styles = StyleSheet.create({
+  nickHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  nickCount: { color: C.textMuted, fontSize: 12, fontWeight: '700' },
+  nickRow: { flexDirection: 'row', alignItems: 'stretch', gap: S.sm },
+  nickBtn: {
+    justifyContent: 'center',
+    paddingHorizontal: S.md,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+  },
+  nickBtnPrimary: { backgroundColor: C.primary, borderColor: C.primary },
+  nickBtnText: { color: C.textSecondary, fontSize: 13, fontWeight: '800' },
+  nickMsg: { fontSize: 12, lineHeight: 17 },
   center: {
     flex: 1,
     alignItems: 'center',

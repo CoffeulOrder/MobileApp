@@ -69,13 +69,16 @@ src/
 │   ├── order-complete.tsx    # "/order-complete"  주문 완료
 │   ├── payment-methods.tsx   # "/payment-methods" 결제수단 관리
 │   ├── notifications.tsx     # "/notifications"   주문 알림
-│   └── coupons.tsx           # "/coupons"         쿠폰 관리
+│   ├── coupons.tsx           # "/coupons"         쿠폰 관리
+│   ├── nickname.tsx          # "/nickname"        닉네임 변경
+│   └── banner.tsx            # "/banner"          이벤트 팝업 (transparentModal)
 │
 ├── components/
 │   └── ui/
 │       └── kit.tsx           # 공용 컴포넌트: Logo, Avatar, PrimaryButton, Field, EmailField, ScreenHeader
 │
 ├── constants/
+│   ├── nickname.ts           # 닉네임 규칙(2~8자, 한글·영문·숫자) + 랜덤 닉네임 생성기
 │   ├── coffeul.ts            # ⭐ 디자인 토큰 + 학교(SCHOOLS) + 메뉴/카페 타입 (Cafe, MenuItem, MenuPayload)
 │   └── theme.ts              # (스타터 잔재, 현재 미사용)
 │
@@ -85,19 +88,25 @@ src/
 │   ├── menu-api.ts           # menu-version, menus, menu-status, POST /orders
 │   ├── menu-schema.ts        # 응답/캐시 JSON 검증 (잘못된 데이터가 캐시를 덮어쓰지 못하게)
 │   ├── voucher-api.ts        # GET /vouchers (교환권)
+│   ├── banner-api.ts         # GET /banners, 노출/클릭 집계 (이벤트 팝업)
+│   ├── profile-api.ts        # 닉네임 중복확인, 가입, 내 정보, 닉네임 변경
 │   ├── voucher-schema.ts     # 교환권·주문 미리보기(quote) 검증 (모르는 kind 는 건너뜀)
 │   └── mock-server.ts        # 앱 안의 가짜 백엔드 + 개발용 제어판(__ormoMock)
 │
 ├── storage/                  # 로컬 저장 (§9)
 │   ├── kv.ts                 # AsyncStorage 래퍼 (MMKV 로 바꿀 때 이 파일만 수정)
 │   ├── menu-cache.ts         # menu:{schoolId} / menuVersion:{schoolId} 읽기·쓰기·삭제
-│   └── image-cache.ts        # 이미지 prefetch 규칙
+│   ├── image-cache.ts        # 이미지 prefetch 규칙
+│   └── banner-store.ts       # "오늘 하루 보지 않기" 기록
 │
 └── hooks/
     ├── use-school.tsx        # 선택한 학교 전역 상태 + useSchools() (Context)
     ├── use-menu.tsx          # ⭐ 메뉴 캐시·버전 갱신·품절·선택한 카페 (Context)
     ├── use-cart.tsx          # 장바구니 전역 상태 (Context) + 고른 교환권 id
     ├── use-vouchers.tsx      # 내 교환권 (개인 데이터, 메모리 전용) (Context)
+    ├── use-banners.tsx       # 이벤트 팝업 세션 상태 (Context)
+    ├── use-profile.tsx       # 내 프로필(닉네임) (개인 데이터, 메모리 전용) (Context)
+    ├── use-nickname.ts       # 닉네임 입력 상태: 형식 검사 / 중복확인 / 랜덤 생성
     ├── use-logout.ts         # 로그아웃: 개인 데이터 비우고 /login 으로 (인증 붙이면 여기에 추가)
     ├── use-theme.ts          # (스타터 잔재, 현재 미사용)
     └── use-color-scheme*     # (스타터 잔재, 현재 미사용)
@@ -168,6 +177,7 @@ src/
 | `C.primary` / `C.primaryDim` | `#008AFF` / `#006FD0` | 브랜드 블루 (버튼, 가격, 강조) |
 | `C.onPrimary` | `#FFFFFF` | 블루 배경 위 글자 |
 | `C.ink` / `C.onInk` | `#111827` / `#FFFFFF` | 어두운 배지(장바구니 수량), 워드마크 / 그 위 글자 |
+| `C.danger` | `#D92D20` | 오류/경고 문구 (중복 닉네임, 잘못된 입력) |
 | `C.text` / `C.textSecondary` / `C.textMuted` | `#111827` / `#4B5563` / `#8A92A0` | 글자 (기본 / 보조 / 흐림) |
 
 > 라이트 전용입니다. `StatusBar` 는 `dark`(`_layout.tsx`). 떠 있는 요소(프로필 드롭다운)는 `boxShadow` 로 구분합니다.
@@ -254,14 +264,15 @@ const PROFILE_ACTIONS = [
   { icon: '💳', label: '결제수단 관리', go: () => router.push('/payment-methods') },
   { icon: '🔔', label: '주문 알림',     go: () => router.push('/notifications') },
   { icon: '🎟️', label: '쿠폰 관리',     go: () => router.push('/coupons') },
+  { icon: '✏️', label: '닉네임 변경',   go: () => router.push('/nickname') },
 ];
 ```
 
 항목을 추가/변경하려면 이 배열만 고치면 됩니다. 새 항목이 새 화면으로 가야 하면
 `src/app/` 에 파일을 만들고 (11.5 참고) `go` 에 `router.push('/경로')` 를 넣습니다.
 
-드롭다운이 가리키는 세 화면(`payment-methods`, `notifications`, `coupons`)은
-**전부 더미 데이터**입니다. 각 파일 상단의 배열(`CARDS`, `ITEMS`, `COUPONS`)을 고치면 내용이 바뀝니다.
+드롭다운이 가리키는 `payment-methods`, `notifications` 화면은 **더미 데이터**입니다(각 파일 상단의 `CARDS`, `ITEMS`).
+`coupons` 는 서버 데이터(§14), `nickname` 은 §16 입니다.
 
 ---
 
@@ -545,7 +556,7 @@ menu('cold-brew', '콜드브루', '12시간 저온 추출한 부드러운 커피
 | `바로 사용` | 그 지점으로 이동(다른 지점이면 장바구니 비움) → 교환권 메뉴 담기 → 교환권 선택 → 메뉴 화면. 이어서 결제하면 자동 적용. |
 | 결제 (`checkout.tsx`) | 현재 지점 교환권을 보여주고 선택. 서버 미리보기(`quote`)가 적용 가능 여부+사유와 할인/최종 금액을 줌. 서버가 "적용 불가"라 하면 선택을 자동 해제하고 안내. 최종 0원이면 결제 수단/카드 입력을 숨기고 `교환권으로 주문하기`. |
 | 주문 완료 | "사용한 교환권" 표시. |
-| 로그아웃 | `useLogout()` 이 교환권 상태를 비움 (메뉴 캐시는 공개 데이터라 유지). |
+| 로그아웃 | `useLogout()` 이 교환권 상태와 이벤트 팝업 세션을 비움 (메뉴 캐시는 공개 데이터라 유지). |
 
 원칙: **할인 금액과 적용 가능 여부는 전부 서버가 계산**하고 앱은 표시만 한다 (메뉴 가격과 같은 원칙).
 교환권 종류가 늘어도 앱이 규칙을 따로 구현하지 않도록 `POST /orders/quote` 를 쓴다.
@@ -554,7 +565,7 @@ menu('cold-brew', '콜드브루', '12시간 저온 추출한 부드러운 커피
 
 `constants/coffeul.ts`(`Voucher` 타입, `MAX_VOUCHERS_PER_ORDER`, `formatDate`, `daysLeft`) ·
 `api/voucher-api.ts`, `api/voucher-schema.ts`, `api/menu-api.ts`(`quoteOrder`, 주문 요청) ·
-`hooks/use-vouchers.tsx`, `hooks/use-cart.tsx`(`voucherIds`), `hooks/use-logout.ts` ·
+`hooks/use-vouchers.tsx`, `hooks/use-cart.tsx`(`voucherIds`), `hooks/use-logout.ts`(로그아웃 시 교환권·프로필·팝업 세션 초기화) ·
 `app/coupons.tsx`, `app/checkout.tsx`, `app/order-complete.tsx` · 목업: `api/mock-server.ts`
 
 ### 14.4 API 가정 (백엔드와 맞춰야 함)
@@ -605,7 +616,128 @@ menu('cold-brew', '콜드브루', '12시간 저온 추출한 부드러운 커피
 
 ---
 
-## 15. 친구 초대 이벤트 계획 (미구현 — 결정된 사항)
+## 15. 이벤트 배너 팝업
+
+로그인 후 첫 메뉴 화면에서 이벤트 팝업을 띄웁니다. `오늘 하루 보지 않기` / `닫기` 두 버튼이 있고, 노출 기간·대상은 서버가 결정합니다.
+
+### 15.1 동작 규칙
+
+| 규칙 | 내용 |
+|---|---|
+| 언제 | **로그인 후 첫 메뉴 화면 진입 때 세션당 1회만** 시도 (`menu.tsx` → `useBanners().prepare()`). 지점 선택 화면 위에는 띄우지 않음. 세션 = 로그아웃/앱 재시작 전까지 (로그아웃하면 초기화, 다음 로그인 후 다시 시도) |
+| 어떤 배너 | 서버가 준 목록을 `priority` 큰 순으로 보고, **"오늘 하루 보지 않기"가 아니고 이미지가 로드된 첫 번째 1개**만. 팝업은 한 번에 1개 |
+| 이미지 | 3초 안에 `expo-image` 로 디스크에 받아지지 않으면(느림/실패/오프라인) **팝업을 띄우지 않음** (빈 팝업 방지) |
+| 방해 금지 | 후보가 준비됐을 때 이미 메뉴를 담았거나(`cart.count > 0`) 다른 화면에 있으면 **조용히 건너뜀** (이 세션에서는 다시 안 뜸) |
+| 실패 처리 | 목록 조회 실패/스키마 오류는 화면을 막지 않고 조용히 팝업 없음 |
+| `닫기` | 팝업만 닫음. 바깥(어두운 영역) 탭, 안드로이드 뒤로가기도 동일. 다음 세션에는 다시 뜸 |
+| `오늘 하루 보지 않기` | 그 배너를 **기기 로컬 시간 기준 다음 자정까지** 숨김. 저장 키 `popup:{userKey}:{bannerId}:hideUntil` — **배너 id 별로 독립**(새 이벤트 팝업은 뜸). 기기 시계가 이상해 "너무 먼 미래"로 저장된 값은 무시 |
+| 이미지 탭 | `link` 가 있으면 팝업을 닫고 이동 |
+
+`userKey` 는 지금 고정값 `'anon'` 입니다 (`storage/banner-store.ts` 의 `BANNER_USER_KEY`). **인증이 붙으면 userId 로 교체**해서 한 기기를 여러 계정이 써도 기록이 섞이지 않게 하세요.
+"오늘 하루 보지 않기" 기록은 로그아웃해도 유지됩니다.
+
+### 15.2 API (백엔드와 맞춰야 함)
+
+```jsonc
+// GET /banners  — 기간/대상(학교, 이벤트 미달성자 등)은 서버가 걸러서 내려줌. 앱은 기기 시계로 기간을 판단하지 않음
+{ "banners": [{
+    "id": "invite-event",
+    "title": "친구 초대하고 교환권 받기",          // 접근성 라벨용 (이미지에 글이 들어 있다고 가정)
+    "imageUrl": "https://…/banner.png",          // 4:5 비율 권장. 문구 포함 완성 이미지
+    "priority": 10,                              // 클수록 먼저
+    "link": { "type": "route", "path": "/coupons" }   // 또는 { "type": "url", "url": "https://…" } / 생략
+}] }
+
+// POST /banners/{id}/events   body: { "event": "impression" | "open" | "close" | "hide_today" }
+//   노출/클릭/닫기/숨김 집계용. 앱은 결과를 기다리지 않고 실패해도 무시
+```
+
+- `route` 링크는 **허용 목록**(`api/banner-api.ts` 의 `BANNER_ROUTES`: `/menu /branch /coupons /notifications /payment-methods`)에 있는 경로만 열립니다. 목록에 없거나 형식이 틀린 링크는 에러가 아니라 **링크 없음**으로 처리(팝업은 뜨되 이동 불가). 새 화면으로 연결하려면 이 목록에 경로를 추가하세요 (예: 친구 초대 화면 `/invite`).
+- `url` 링크는 `https://` 만 허용하고 인앱 브라우저(`expo-web-browser`)로 엽니다.
+- 배너 하나가 깨져 있어도 나머지는 정상 표시됩니다 (항목 단위로 건너뜀).
+
+### 15.3 파일
+
+`app/banner.tsx`(팝업 UI, `_layout.tsx` 에서 `transparentModal` 로 등록) · `hooks/use-banners.tsx`(세션 상태: `prepare / show / skip / close / reset`) ·
+`api/banner-api.ts` · `storage/banner-store.ts` · 트리거: `app/menu.tsx` · 초기화: `hooks/use-logout.ts` · 목업: `api/mock-server.ts`
+
+### 15.4 테스트 방법 (목업, 웹 `localhost:8082`)
+
+목업 배너는 2개: `invite-event`(priority 10, 링크 `/coupons` — 친구 초대 화면이 생기기 전까지 임시), `semester-event`(priority 5, 외부 링크).
+
+| 확인할 것 | 방법 |
+|---|---|
+| 첫 메뉴 진입 때 팝업 | 학교 선택 → 로그인 → 지점 → 메뉴. `invite-event` 가 뜨고 `__ormoMock.state.bannerEvents` 에 `impression` |
+| 오늘 하루 보지 않기 | 버튼 → `localStorage['popup:anon:invite-event:hideUntil']` = 다음 자정, `hide_today` 집계. 로그아웃/재로그인하면 `semester-event` 가 대신 뜸 (배너별 독립) |
+| 닫기 | `close` 집계만 되고 저장 키는 생기지 않음 |
+| 담는 중이면 건너뜀 | `__ormoMock.state.latencyMs = 2500` 으로 느리게 만들고 로그인 후 팝업이 도착하기 전에 메뉴를 담으면 노출 없음 |
+| 링크 | 이미지 탭 → `/coupons` 로 이동, `open` 집계 |
+| 팝업 없음 | `__ormoMock.setBanners([])` |
+| 숨김 기록 지우기 | `localStorage.removeItem('popup:anon:배너id:hideUntil')` 후 새로고침 |
+
+### 15.5 이후 작업
+
+- 메뉴 화면 상단에 항상 보이는 **인라인 배너 슬롯**(비모달)을 추가하면 팝업을 놓친 사용자도 이벤트에 들어올 수 있음 (필요하면 `display: 'popup' | 'strip'` 필드를 API 에 추가).
+- 친구 초대 화면(§17 ③)이 생기면 `invite-event` 링크를 그 화면으로 바꾸고 `BANNER_ROUTES` 에 추가.
+
+---
+
+## 16. 닉네임
+
+회원가입 때 닉네임을 정하고(중복확인 + 자동 랜덤 생성), 앱 안에서도 바꿀 수 있습니다.
+
+### 16.1 규칙 (`constants/nickname.ts` 한 곳)
+
+| 항목 | 값 |
+|---|---|
+| 길이 | **최대 8자** (확정). 최소 2자 (기본값) — 한글 한 글자 = 1자 |
+| 허용 문자 | 한글(완성형), 영문, 숫자. 공백/특수문자/이모지 불가 (기본값) |
+| 중복 | 대소문자 구분 없이 판정 (서버) |
+| 금칙어 | 서버가 판정 (운영 사칭 단어 등). 앱은 "사용할 수 없는 닉네임이에요"로만 안내 |
+
+최소 길이와 허용 문자는 제가 정한 기본값이므로 바꾸려면 `validateNickname` 만 고치면 됩니다. **서버도 같은 규칙으로 반드시 다시 검증**해야 합니다.
+
+### 16.2 화면 동작
+
+- **회원가입** (`login.tsx`): 가입 탭에 처음 들어가면 **랜덤 닉네임이 자동으로 채워지고**(서버 중복확인까지 마친 상태), 직접 고치거나 `🎲 랜덤`으로 다시 만들 수 있음.
+  `중복확인`에서 사용 가능으로 확인된 닉네임이어야 `회원가입` 버튼이 활성화됨. 입력을 바꾸면 확인이 무효가 되어 다시 확인해야 함.
+- **닉네임 변경** (`nickname.tsx`): 프로필 메뉴 → `닉네임 변경`. 가입 때와 같은 입력/확인 UI. 현재 닉네임과 같으면 "현재 사용 중인 닉네임이에요", 사용 가능 확인 후 `저장`.
+- **표시**: 메뉴 화면 인사말 "안녕하세요, 닉네임님 ☕" (헤더가 좁아 길면 말줄임).
+- 랜덤 생성: `형용사 + 명사`(예: 졸린라떼) → 서버 확인 → 사용 중이면 다시 (최대 5회, 3번째 시도부터 숫자 2자리를 붙임, 예: 졸린라떼42). 단어는 모두 3자 이하라서 어떤 조합도 8자를 넘지 않음 (`NICKNAME_MAX` 기준, 전 조합 360개 검증).
+- 중복확인은 **예약이 아님**: 확인 후 가입/변경 사이에 다른 사용자가 먼저 쓸 수 있어, 서버가 409 `NICKNAME_TAKEN` 을 돌려주면 "방금 다른 사용자가 사용했어요"로 되돌리고 다시 고르게 함.
+
+### 16.3 API (백엔드와 맞춰야 함)
+
+| 요청 | 응답 |
+|---|---|
+| `GET /nicknames/availability?nickname=` | `{ available: boolean, reason?: 'TAKEN' \| 'INVALID' \| 'FORBIDDEN' }` |
+| `POST /auth/signup` `{ schoolId, email, name, password, nickname }` | `{ nickname }` / 409 `NICKNAME_TAKEN` / 400 `NICKNAME_INVALID` |
+| `GET /me` | `{ nickname }` |
+| `POST /me/nickname` `{ nickname }` | `{ nickname }` / 409 `NICKNAME_TAKEN` / 400 `NICKNAME_INVALID` |
+
+- 이메일 인증(6자리 코드)이 붙으면 가입은 2단계가 되고, **닉네임은 1단계(가입 요청) 본문에 같이 보냅니다** (§17).
+- 닉네임을 바꾸면 이전 닉네임은 반납되어 다른 사용자가 쓸 수 있다고 가정 (목업 동작). 정책은 서버가 결정.
+- 닉네임은 개인 데이터라 `use-profile.tsx` 에 메모리로만 두고 로그아웃하면 비웁니다.
+
+### 16.4 정책 결정이 필요한 부분 (현재 앱에는 없음)
+
+- **변경 횟수/주기 제한** (예: 30일에 1회) — 지금은 제한 없음. 제한을 두면 서버가 거절 사유를 주고 앱은 그 문구를 보여주도록 `nickname.tsx` 에 처리를 추가하면 됨.
+- **금칙어/비속어 기준**, 탈퇴한 사용자의 닉네임 재사용 시점.
+- 친구 초대 현황(§17) 등 **다른 사용자에게 보이는 이름은 실명 대신 닉네임**을 쓰는 것을 권장.
+
+### 16.5 테스트 방법 (목업, 웹 `localhost:8082`)
+
+| 확인할 것 | 방법 |
+|---|---|
+| 자동 생성 | 로그인 화면 `회원가입` 탭 진입 → 닉네임이 채워지고 "사용할 수 있는 닉네임이에요." |
+| 중복/형식/금칙어 | `졸린라떼`(이미 사용 중), `a b`·`닉네임!`(문자), `가`(짧음), `관리자1`(금칙어) |
+| 대소문자 | `__ormoMock.takeNickname('Brew')` 후 `BREW` 확인 → 이미 사용 중 |
+| 확인~가입 사이 경쟁 | 사용 가능 확인 후 `__ormoMock.takeNickname('그닉네임')` → 가입/저장 → "방금 다른 사용자가 사용했어요" |
+| 변경 | 프로필 메뉴 → 닉네임 변경 → 저장 → 인사말 갱신, `__ormoMock.state.me` 와 이전 닉네임 반납 확인 |
+
+---
+
+## 17. 친구 초대 이벤트 계획 (미구현 — 결정된 사항)
 
 이벤트 규칙: 학생 1이 추천인 코드/링크로 신규 가입자 5명을 초대하면, **선착순 N명**에게 교환권 지급. (초대 수 집계·선착순 판정은 전부 서버.)
 
@@ -622,16 +754,15 @@ menu('cold-brew', '콜드브루', '12시간 저온 추출한 부드러운 커피
 - 메일 앱을 보러 나갔다 와도 이어지도록 **진행 중인 가입 상태(아이디, 추천인 코드)를 AsyncStorage 에 저장**하고 코드 입력 화면에서 복구.
 - 코드 입력 화면: 만료 타이머, 재전송 쿨다운(60초 안팎), 오류 횟수 제한 안내.
 - ⚠️ `EmailField` 는 지금 `@` 만 걸러서 `아이디+1` 같은 **`+` 별칭**을 입력할 수 있다 → 앱에서 `+` 입력 차단(UX), **서버에서 정규화해 중복 계정 방지(필수)**.
-- 초대 현황 화면은 "가입 완료한 친구"만 표시하면 됨 (인증 대기 중인 친구는 서버에 계정이 없음). 친구 이름은 마스킹, 남은 쿠폰 수/기간/유의사항은 서버 값을 **캐시 없이** 표시.
+- 초대 현황 화면은 "가입 완료한 친구"만 표시하면 됨 (인증 대기 중인 친구는 서버에 계정이 없음). 친구는 실명 대신 **닉네임**(§16)으로 표시, 남은 쿠폰 수/기간/유의사항은 서버 값을 **캐시 없이** 표시.
 
-이벤트 배너/팝업(예정): 로그인 후 첫 메뉴 화면 진입 시 세션당 1회, `오늘 하루 보지 않기`(기기 로컬 자정까지, 키 `popup:{userId}:{bannerId}`) / `닫기`,
-서버 주도(`GET /banners`, 기간·타겟은 서버 필터), 이미지 로드 후에만 표시, `transparentModal` 라우트로 구현, 링크는 앱 내부 경로 허용 목록만.
+이벤트 배너/팝업은 구현 완료 → §15.
 
-구현 순서: ① 쿠폰(교환권) API화 + 결제 연동 **(완료, §14)** → ② 배너 팝업 → ③ 가입 2단계 + 초대 화면 → ④ 딥링크/푸시 (개발 빌드 필요 — 원격 푸시는 Expo Go Android 불가).
+구현 순서: ① 쿠폰(교환권) API화 + 결제 연동 **(완료, §14)** → ② 배너 팝업 **(완료, §15)** → ③ 가입 2단계 + 초대 화면 → ④ 딥링크/푸시 (개발 빌드 필요 — 원격 푸시는 Expo Go Android 불가).
 
 ---
 
-## 16. 참고 링크
+## 18. 참고 링크
 
 - Expo SDK 57 문서: https://docs.expo.dev/versions/v57.0.0/
 - Expo Router (라우팅): https://docs.expo.dev/router/introduction/

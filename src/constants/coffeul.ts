@@ -22,6 +22,8 @@ export const C = {
   ink: '#111827',
   /** text sitting on top of `ink` */
   onInk: '#FFFFFF',
+  /** 오류/경고 문구 (중복 닉네임, 잘못된 입력 등) */
+  danger: '#D92D20',
   /** text */
   text: '#111827',
   textSecondary: '#4B5563',

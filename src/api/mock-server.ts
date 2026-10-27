@@ -14,8 +14,13 @@
  *   __ormoMock.discontinueMenu('americano')          // 메뉴 단종 (모든 카페에서 제거 + 버전 증가). 교환권은 유효기간까지 보관됨
  *   __ormoMock.expireVoucher('v-americano')          // 교환권을 만료 처리 (앱이 모르는 사이 만료되는 상황)
  *   __ormoMock.state.vouchers                        // 내 교환권 목록
+ *   __ormoMock.takeNickname('졸린라떼')               // 다른 사용자가 그 닉네임을 먼저 가져간 상황 재현 (확인 후 가입/변경 사이)
+ *   __ormoMock.state.me                              // 내 프로필 (nickname)
+ *   __ormoMock.setBanners([...])                     // 이벤트 팝업 목록 교체 (빈 배열이면 팝업 없음)
+ *   __ormoMock.state.bannerEvents                    // 서버가 받은 노출/클릭/숨김 집계
  */
 import { ApiError, NetworkError } from '@/api/errors';
+import { validateNickname } from '@/constants/nickname';
 import { MAX_VOUCHERS_PER_ORDER, SCHOOLS, type Cafe, type MenuItem, type Voucher } from '@/constants/coffeul';
 
 const photo = (id: string, w: number) =>
@@ -83,12 +88,43 @@ const initialVouchers = (): Voucher[] => [
   { kind: 'MENU_EXCHANGE', id: 'v-earl-grey', title: '얼그레이 교환권', status: 'EXPIRED', expiresAt: inDays(-5), cafeId: 'beomseok', cafeName: '범석관', menuId: 'earl-grey', menuName: '얼그레이' },
 ];
 
+/**
+ * 이벤트 팝업 (목업). 실제로는 서버가 기간/대상을 걸러서 내려준다. 이미지는 마케팅이 만든 문구 포함 이미지를 가정하지만
+ * 목업은 사진만 쓴다. 첫 번째 배너의 링크는 친구 초대 화면(미구현)이 생기기 전까지 쿠폰 화면으로 연결해 둔 임시값.
+ */
+const initialBanners = () => [
+  {
+    id: 'invite-event',
+    title: '친구 초대하고 교환권 받기',
+    imageUrl: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=800&h=1000&q=70&auto=format&fit=crop',
+    priority: 10,
+    link: { type: 'route', path: '/coupons' } as unknown,
+  },
+  {
+    id: 'semester-event',
+    title: '개강 기념 이벤트',
+    imageUrl: 'https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=800&h=1000&q=70&auto=format&fit=crop',
+    priority: 5,
+    link: { type: 'url', url: 'https://docs.expo.dev' } as unknown,
+  },
+];
+
+/** 이미 사용 중인 닉네임(소문자). 중복 판정은 대소문자 구분 없이 한다. */
+const initialNicknames = () => new Set(['졸린라떼', '행복한모카', '달콤한푸딩', '테스트', 'admin']);
+/** 운영 사칭 등으로 쓸 수 없는 단어 (포함되면 불가). 실제 서버는 금칙어 정책을 따로 가진다. */
+const FORBIDDEN_WORDS = ['관리자', '운영자', 'admin', 'ormo'];
+
 const state = {
   offline: false,
   latencyMs: 250,
   versions: Object.fromEntries(SCHOOLS.map((s) => [s.id, 1])) as Record<string, number>,
   cafes: initialCafes(),
   vouchers: initialVouchers(),
+  nicknames: initialNicknames(),
+  /** 목업의 내 계정 (인증이 없어서 한 명) */
+  me: { nickname: '졸린라떼' },
+  banners: initialBanners() as unknown[],
+  bannerEvents: [] as { id: string; event: string }[],
   soldOut: {} as Record<string, Set<string>>,
   calls: [] as string[],
   /** 마지막으로 받은 POST /orders 본문 (전송 내용 확인용) */
@@ -96,6 +132,24 @@ const state = {
 };
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
+
+/** 닉네임 상태: 형식 → 금칙어 → 중복 순으로 판정 */
+function nicknameStatus(nickname: string): { available: true } | { available: false; reason: 'TAKEN' | 'INVALID' | 'FORBIDDEN' } {
+  if (validateNickname(nickname) !== null) return { available: false, reason: 'INVALID' };
+  const lower = nickname.toLowerCase();
+  if (FORBIDDEN_WORDS.some((w) => lower.includes(w))) return { available: false, reason: 'FORBIDDEN' };
+  if (state.nicknames.has(lower)) return { available: false, reason: 'TAKEN' };
+  return { available: true };
+}
+
+const queryParam = (path: string, key: string) => {
+  const q = path.split('?')[1] ?? '';
+  for (const pair of q.split('&')) {
+    const [k, v = ''] = pair.split('=');
+    if (decodeURIComponent(k) === key) return decodeURIComponent(v);
+  }
+  return '';
+};
 
 type OrderCtx = {
   schoolId: string;
@@ -171,6 +225,37 @@ export async function handleMockRequest<T>(method: string, path: string, body?: 
   if (method === 'GET' && (m = path.match(/^\/cafes\/([^/]+)\/menu-status$/))) {
     const cafeId = decodeURIComponent(m[1]);
     return { soldOutMenuIds: [...(state.soldOut[cafeId] ?? [])] } as T;
+  }
+
+  if (method === 'GET' && path.startsWith('/nicknames/availability')) {
+    return nicknameStatus(queryParam(path, 'nickname')) as T;
+  }
+
+  if (method === 'GET' && path === '/me') {
+    return clone(state.me) as T;
+  }
+
+  if (method === 'POST' && (path === '/auth/signup' || path === '/me/nickname')) {
+    const nickname = String((body as { nickname?: unknown })?.nickname ?? '');
+    const r = nicknameStatus(nickname);
+    if (!r.available) {
+      // 확인과 요청 사이에 다른 사용자가 먼저 가져간 경우(TAKEN)와 형식/금칙어 오류를 구분해서 돌려준다
+      if (r.reason === 'TAKEN') throw new ApiError(409, 'NICKNAME_TAKEN', { code: 'NICKNAME_TAKEN' });
+      throw new ApiError(400, 'NICKNAME_INVALID', { code: 'NICKNAME_INVALID', reason: r.reason });
+    }
+    if (path === '/me/nickname') state.nicknames.delete(state.me.nickname.toLowerCase()); // 이전 닉네임 반납
+    state.nicknames.add(nickname.toLowerCase());
+    state.me = { nickname };
+    return { nickname } as T;
+  }
+
+  if (method === 'GET' && path === '/banners') {
+    return { banners: clone(state.banners) } as T;
+  }
+
+  if (method === 'POST' && (m = path.match(/^\/banners\/([^/]+)\/events$/))) {
+    state.bannerEvents.push({ id: decodeURIComponent(m[1]), event: (body as { event?: string })?.event ?? '' });
+    return {} as T;
   }
 
   if (method === 'GET' && path === '/vouchers') {
@@ -256,6 +341,14 @@ const controls = {
     const set = (state.soldOut[cafeId] ??= new Set());
     if (on) set.add(menuId);
     else set.delete(menuId);
+  },
+  /** 다른 사용자가 이 닉네임을 먼저 가져간 상황 재현 */
+  takeNickname(nickname: string) {
+    state.nicknames.add(nickname.toLowerCase());
+  },
+  /** 이벤트 팝업 목록 교체 */
+  setBanners(list: unknown[]) {
+    state.banners = list;
   },
   /** 교환권을 만료 처리 (앱이 모르는 사이에 만료되는 상황 재현) */
   expireVoucher(id: string) {

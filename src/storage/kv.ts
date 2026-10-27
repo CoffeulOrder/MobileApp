@@ -8,6 +8,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const kv = {
+  get: (key: string) => AsyncStorage.getItem(key),
+  set: (key: string, value: string) => AsyncStorage.setItem(key, value),
   getAllKeys: () => AsyncStorage.getAllKeys(),
   multiGet: (keys: string[]) => AsyncStorage.multiGet(keys),
   /** 여러 키를 한 번의 네이티브 호출로 저장 (iOS/Android 에서 한 배치로 기록됨) */

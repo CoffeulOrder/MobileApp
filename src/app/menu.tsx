@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
-import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { Redirect, router, useFocusEffect, useNavigation } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -13,8 +13,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { Avatar, LoadingView, RetryView } from '@/components/ui/kit';
 import { C, Radius, S, won, type MenuItem } from '@/constants/coffeul';
+import { useBanners } from '@/hooks/use-banners';
 import { useCart } from '@/hooks/use-cart';
 import { useLogout } from '@/hooks/use-logout';
+import { useProfile } from '@/hooks/use-profile';
 import { useMenu } from '@/hooks/use-menu';
 import { useSchool } from '@/hooks/use-school';
 
@@ -23,13 +25,17 @@ const PROFILE_ACTIONS: { icon: string; label: string; go: () => void }[] = [
   { icon: '💳', label: '결제수단 관리', go: () => router.push('/payment-methods') },
   { icon: '🔔', label: '주문 알림', go: () => router.push('/notifications') },
   { icon: '🎟️', label: '쿠폰 관리', go: () => router.push('/coupons') },
+  { icon: '✏️', label: '닉네임 변경', go: () => router.push('/nickname') },
 ];
 
 export default function MenuScreen() {
   const [cat, setCat] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const cart = useCart();
+  const banners = useBanners();
+  const navigation = useNavigation();
   const logout = useLogout();
+  const profile = useProfile();
   const { school } = useSchool();
   const { cafe, status, soldOut, sync, retry, refreshSoldOut } = useMenu();
   const insets = useSafeAreaInsets();
@@ -45,6 +51,29 @@ export default function MenuScreen() {
       if (cafeId) void refreshSoldOut(cafeId);
     }, [sync, refreshSoldOut, cafeId]),
   );
+
+  // 내 닉네임을 아직 못 받았으면 받아온다 (인사말에 표시)
+  useEffect(() => {
+    if (profile.nickname === null) void profile.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 이벤트 팝업: 로그인 후 첫 메뉴 진입 때 한 번만 준비한다 (세션당 1회, 로그아웃하면 초기화)
+  useFocusEffect(
+    useCallback(() => {
+      banners.prepare();
+    }, [banners.prepare]),
+  );
+  // 후보가 준비됐을 때 이 화면에 머물러 있고 아직 메뉴를 담지 않았을 때만 띄운다 (담는 중이면 방해하지 않고 건너뜀)
+  useEffect(() => {
+    if (!banners.candidate) return;
+    if (navigation.isFocused() && cart.count === 0 && !menuOpen) {
+      if (banners.show()) router.push('/banner');
+    } else {
+      banners.skip();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [banners.candidate]);
 
   const categories = useMemo(() => [...new Set((cafe?.menus ?? []).map((m) => m.category))], [cafe]);
   const activeCat = cat && categories.includes(cat) ? cat : (categories[0] ?? null);
@@ -71,9 +100,11 @@ export default function MenuScreen() {
       <View style={styles.header}>
         <Pressable style={styles.profileRow} onPress={() => setMenuOpen((v) => !v)} hitSlop={6}>
           <Avatar />
-          <View>
+          <View style={{ flexShrink: 1 }}>
             <Text style={styles.brand}>ORMO</Text>
-            <Text style={styles.hello}>안녕하세요, 고객님 ☕</Text>
+            <Text style={styles.hello} numberOfLines={1}>
+              안녕하세요, {profile.nickname ?? '고객'}님 ☕
+            </Text>
           </View>
         </Pressable>
 

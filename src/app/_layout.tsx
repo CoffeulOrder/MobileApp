@@ -5,8 +5,10 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { C } from '@/constants/coffeul';
+import { BannerProvider } from '@/hooks/use-banners';
 import { CartProvider } from '@/hooks/use-cart';
 import { MenuProvider } from '@/hooks/use-menu';
+import { ProfileProvider } from '@/hooks/use-profile';
 import { SchoolProvider } from '@/hooks/use-school';
 import { VoucherProvider } from '@/hooks/use-vouchers';
 
@@ -22,6 +24,8 @@ export default function RootLayout() {
       <SchoolProvider>
         <MenuProvider>
           <VoucherProvider>
+          <ProfileProvider>
+          <BannerProvider>
           <CartProvider>
             <StatusBar style="dark" />
             <Stack
@@ -38,12 +42,19 @@ export default function RootLayout() {
               <Stack.Screen name="payment-methods" />
               <Stack.Screen name="notifications" />
               <Stack.Screen name="coupons" />
+              <Stack.Screen name="nickname" />
+              <Stack.Screen
+                name="banner"
+                options={{ presentation: 'transparentModal', animation: 'fade' }}
+              />
               <Stack.Screen
                 name="cart"
                 options={{ presentation: 'transparentModal', animation: 'fade' }}
               />
             </Stack>
           </CartProvider>
+          </BannerProvider>
+          </ProfileProvider>
           </VoucherProvider>
         </MenuProvider>
       </SchoolProvider>
